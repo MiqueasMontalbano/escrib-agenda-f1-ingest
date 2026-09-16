@@ -1,0 +1,13 @@
+{
+  "name": "agenda-f1-ingest",
+  "version": "1.0.0",
+  "description": "Ingestor de calendario F1 (jolpica-f1) hacia Supabase para agenda de deportistas argentinos",
+  "type": "module",
+  "main": "ingest-f1.mjs",
+  "scripts": {
+    "start": "node ingest-f1.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4"
+  }
+}
