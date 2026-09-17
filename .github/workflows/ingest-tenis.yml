@@ -1,0 +1,24 @@
+name: Ingest Tenis
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'   # cada 2 horas
+  workflow_dispatch:         # permite correrlo a mano desde el tab Actions de GitHub
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npm install
+
+      - run: node ingest-tenis.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LIVETENNIS_API_KEY: ${{ secrets.LIVETENNIS_API_KEY }}
