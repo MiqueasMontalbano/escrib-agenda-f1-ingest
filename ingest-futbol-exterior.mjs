@@ -167,7 +167,7 @@ async function resolveEscudo(nombreClub) {
     .eq('nombre_club', nombreClub)
     .maybeSingle();
 
-  if (cacheado) {
+  if (cacheado && cacheado.escudo_url) {
     cacheEscudosEnMemoria[nombreClub] = cacheado.escudo_url;
     return cacheado.escudo_url;
   }
@@ -181,16 +181,21 @@ async function resolveEscudo(nombreClub) {
     if (resp.ok) {
       const data = await resp.json();
       escudoUrl = data?.response?.[0]?.team?.logo ?? null;
+    } else {
+      console.warn(`api-football.com respondió ${resp.status} buscando "${nombreClub}" — probablemente límite de requests por minuto.`);
     }
-    await pausa(1100); // no pasarnos del rate limit de la cuenta free
+    await pausa(6500); // el plan free es más estricto por minuto de lo que parece; vamos despacio
   } catch (e) {
     console.warn(`No pude resolver el escudo de "${nombreClub}": ${e.message}`);
   }
 
-  // 3. lo guardamos en la caché (incluso si vino null, para no reintentar cada corrida)
-  await supabase
-    .from('escudos_clubes')
-    .upsert({ nombre_club: nombreClub, escudo_url: escudoUrl, actualizado_en: new Date().toISOString() }, { onConflict: 'nombre_club' });
+  // Solo cacheamos cuando SÍ encontramos algo. Si vino null (por rate limit u otra falla temporal),
+  // no lo guardamos como definitivo — así la próxima corrida lo vuelve a intentar solo.
+  if (escudoUrl) {
+    await supabase
+      .from('escudos_clubes')
+      .upsert({ nombre_club: nombreClub, escudo_url: escudoUrl, actualizado_en: new Date().toISOString() }, { onConflict: 'nombre_club' });
+  }
 
   cacheEscudosEnMemoria[nombreClub] = escudoUrl;
   return escudoUrl;
