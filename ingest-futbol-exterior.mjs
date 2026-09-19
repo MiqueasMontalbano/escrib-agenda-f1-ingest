@@ -1,6 +1,6 @@
 // ============================================================
 //  Ingestor de Fútbol — Argentinos en las 5 grandes ligas de Europa
-//  (football-data.org → Supabase)
+//  (football-data.org para el calendario + api-football.com para escudos reales)
 //  Corre cada ~2 horas.
 // ============================================================
 //
@@ -8,16 +8,13 @@
 //    SUPABASE_URL
 //    SUPABASE_SERVICE_ROLE_KEY
 //    FOOTBALL_DATA_API_KEY   (gratis en football-data.org/client/register)
+//    API_FOOTBALL_KEY        (gratis en api-football.com, plan Free)
 //
-//  Cobertura: Premier League, La Liga, Serie A, Bundesliga, Ligue 1,
-//  Championship (Inglaterra) y Champions League — son las competencias
-//  incluidas en el plan gratuito de football-data.org.
-//  OJO: la Europa League y la Conference League NO están en el plan
-//  gratis, así que quedan afuera por ahora.
+//  Cobertura calendario: Premier League, La Liga, Serie A, Bundesliga, Ligue 1,
+//  Championship (Inglaterra) y Champions League — plan gratuito de football-data.org.
 //
-//  Si algún club no aparece en los logs con "resuelto", puede ser que:
-//   a) esté en una liga que no cubre el plan gratis, o
-//   b) el nombre no matcheó bien con el de la API (revisar TEAM_ID_MANUAL).
+//  Escudos: se resuelven vía api-football.com y se guardan en la tabla
+//  escudos_clubes para no gastar cuota pidiendo el mismo escudo dos veces.
 //
 //  Uso local:
 //    node ingest-futbol-exterior.mjs
@@ -28,15 +25,21 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL   = process.env.SUPABASE_URL;
 const SUPABASE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const FD_KEY          = process.env.FOOTBALL_DATA_API_KEY;
+const AF_KEY          = process.env.API_FOOTBALL_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_KEY || !FD_KEY) {
   console.error('Faltan SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY o FOOTBALL_DATA_API_KEY.');
   process.exit(1);
 }
+if (!AF_KEY) {
+  console.warn('Falta API_FOOTBALL_KEY — el script va a seguir funcionando, pero sin escudos reales (quedan en blanco).');
+}
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const FD_BASE = 'https://api.football-data.org/v4';
 const FD_HEADERS = { 'X-Auth-Token': FD_KEY };
+const AF_BASE = 'https://v3.football.api-sports.io';
+const AF_HEADERS = { 'x-apisports-key': AF_KEY };
 
 // Competencias domésticas a resolver (Champions League sale sola al traer
 // los partidos de cada equipo, no hace falta listarla acá).
@@ -150,6 +153,49 @@ async function fdGet(path) {
 
 function pausa(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// ---------- Escudos reales vía api-football.com, con caché en Supabase ----------
+const cacheEscudosEnMemoria = {}; // evita ir a Supabase dos veces por el mismo club en la misma corrida
+
+async function resolveEscudo(nombreClub) {
+  if (!nombreClub || nombreClub === '?') return null;
+  if (nombreClub in cacheEscudosEnMemoria) return cacheEscudosEnMemoria[nombreClub];
+
+  // 1. ¿ya lo tenemos guardado de una corrida anterior?
+  const { data: cacheado } = await supabase
+    .from('escudos_clubes')
+    .select('escudo_url')
+    .eq('nombre_club', nombreClub)
+    .maybeSingle();
+
+  if (cacheado) {
+    cacheEscudosEnMemoria[nombreClub] = cacheado.escudo_url;
+    return cacheado.escudo_url;
+  }
+
+  // 2. no está cacheado: lo pedimos a api-football.com (si tenemos key)
+  if (!AF_KEY) return null;
+
+  let escudoUrl = null;
+  try {
+    const resp = await fetch(`${AF_BASE}/teams?search=${encodeURIComponent(nombreClub)}`, { headers: AF_HEADERS });
+    if (resp.ok) {
+      const data = await resp.json();
+      escudoUrl = data?.response?.[0]?.team?.logo ?? null;
+    }
+    await pausa(1100); // no pasarnos del rate limit de la cuenta free
+  } catch (e) {
+    console.warn(`No pude resolver el escudo de "${nombreClub}": ${e.message}`);
+  }
+
+  // 3. lo guardamos en la caché (incluso si vino null, para no reintentar cada corrida)
+  await supabase
+    .from('escudos_clubes')
+    .upsert({ nombre_club: nombreClub, escudo_url: escudoUrl, actualizado_en: new Date().toISOString() }, { onConflict: 'nombre_club' });
+
+  cacheEscudosEnMemoria[nombreClub] = escudoUrl;
+  return escudoUrl;
+}
+
 async function main() {
   // ---------- 0. Asegurar deporte "futbol" ----------
   let deporteId;
@@ -243,6 +289,10 @@ async function main() {
 
       const local = partido.homeTeam?.name ?? '?';
       const visitante = partido.awayTeam?.name ?? '?';
+      const [escudoLocal, escudoVisitante] = await Promise.all([
+        resolveEscudo(local),
+        resolveEscudo(visitante),
+      ]);
 
       const { data: evento, error: errEvento } = await supabase
         .from('eventos')
@@ -256,6 +306,8 @@ async function main() {
             instancia: partido.stage ?? competencia_nombre,
             sede: partido.venue ?? null,
             horario_confirmado: true,
+            escudo_local: escudoLocal,
+            escudo_visitante: escudoVisitante,
             actualizado_en: new Date().toISOString(),
           },
           { onConflict: 'fuente,fuente_id' }
