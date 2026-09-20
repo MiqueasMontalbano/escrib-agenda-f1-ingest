@@ -2,7 +2,7 @@ name: Ingest Rugby Hockey Voley
 
 on:
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '48 */2 * * *'
   workflow_dispatch:
 
 jobs:
