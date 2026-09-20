@@ -62,7 +62,6 @@ async function sportsDbGet(path, reintentos = 2) {
   }
   return resp.json();
 }
-}
 
 async function resolverTeamId(seleccion) {
   if (seleccion.teamId) return seleccion.teamId;
