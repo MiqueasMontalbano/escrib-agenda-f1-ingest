@@ -2,7 +2,7 @@ name: Ingest Tenis
 
 on:
   schedule:
-    - cron: '0 */2 * * *'   # cada 2 horas
+    - cron: '8 */2 * * *'   # cada 2 horas
   workflow_dispatch:         # permite correrlo a mano desde el tab Actions de GitHub
 
 jobs:
