@@ -1,3 +1,12 @@
+// ============================================================
+//  Ingestor de Selecciones Nacionales — Básquet, Rugby, Vóley, Hockey
+//  (TheSportsDB → Supabase)
+//  Corre cada ~2 horas.
+// ============================================================
+//
+//  Variables de entorno necesarias:
+//    SUPABASE_URL
+//    SUPABASE_SERVICE_ROLE_KEY
 //
 //  No necesita API key propia (usa la key pública de prueba "3" de
 //  TheSportsDB, igual que el ingestor de la Selección de fútbol).
