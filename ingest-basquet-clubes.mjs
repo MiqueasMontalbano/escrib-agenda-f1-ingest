@@ -44,11 +44,17 @@ const JUGADORES = [
   { slug: 'maximo-fjellerup',     club: 'Bàsquet Girona' },
 ];
 
-async function sportsDbGet(path) {
+async function sportsDbGet(path, reintentos = 2) {
   const resp = await fetch(`${SPORTSDB_BASE}${path}`);
+  if (resp.status === 429 || resp.status === 403) {
+    if (reintentos > 0) {
+      console.warn(`TheSportsDB nos frenó (${resp.status}), espero 30s y reintento...`);
+      await pausa(30000);
+      return sportsDbGet(path, reintentos - 1);
+    }
+  }
   if (!resp.ok) {
-    const body = await resp.text().catch(() => '');
-    throw new Error(`TheSportsDB respondió ${resp.status}: ${body}`);
+    throw new Error(`TheSportsDB respondió ${resp.status}`);
   }
   return resp.json();
 }
