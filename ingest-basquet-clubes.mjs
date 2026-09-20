@@ -55,14 +55,51 @@ async function sportsDbGet(path) {
 
 function pausa(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// ---------- Escudos reales vía TheSportsDB, con la misma caché que usa fútbol exterior ----------
+const cacheEscudosEnMemoria = {};
+
+async function resolverEscudo(nombreClub, badgeYaConocido) {
+  if (!nombreClub) return null;
+  if (nombreClub in cacheEscudosEnMemoria) return cacheEscudosEnMemoria[nombreClub];
+
+  const { data: cacheado } = await supabase
+    .from('escudos_clubes').select('escudo_url').eq('nombre_club', nombreClub).maybeSingle();
+
+  if (cacheado && cacheado.escudo_url) {
+    cacheEscudosEnMemoria[nombreClub] = cacheado.escudo_url;
+    return cacheado.escudo_url;
+  }
+
+  let escudoUrl = badgeYaConocido || null;
+
+  if (!escudoUrl) {
+    try {
+      const data = await sportsDbGet(`/searchteams.php?t=${encodeURIComponent(nombreClub)}`);
+      escudoUrl = data?.teams?.[0]?.strTeamBadge ?? null;
+      await pausa(1200);
+    } catch (e) {
+      console.warn(`No pude resolver el escudo de "${nombreClub}": ${e.message}`);
+    }
+  }
+
+  if (escudoUrl) {
+    await supabase
+      .from('escudos_clubes')
+      .upsert({ nombre_club: nombreClub, escudo_url: escudoUrl, actualizado_en: new Date().toISOString() }, { onConflict: 'nombre_club' });
+  }
+
+  cacheEscudosEnMemoria[nombreClub] = escudoUrl;
+  return escudoUrl;
+}
+
 async function resolverClubId(nombreClub) {
   const data = await sportsDbGet(`/searchteams.php?t=${encodeURIComponent(nombreClub)}`);
   const encontrado = data?.teams?.find(t => t.strSport === 'Basketball') ?? data?.teams?.[0];
   if (!encontrado) {
     console.warn(`No encontré el club "${nombreClub}" en TheSportsDB.`);
-    return null;
+    return { id: null, badge: null };
   }
-  return encontrado.idTeam;
+  return { id: encontrado.idTeam, badge: encontrado.strTeamBadge ?? null };
 }
 
 async function main() {
@@ -91,9 +128,15 @@ async function main() {
   // ---------- 2. resolver el club de cada jugador cargado ----------
   const clubesUnicos = Array.from(new Set(JUGADORES.filter(j => deportistaIdPorSlug[j.slug]).map(j => j.club)));
   const teamIdPorClub = {};
+  const teamBadgePorClub = {};
 
   for (const club of clubesUnicos) {
-    teamIdPorClub[club] = await resolverClubId(club);
+    const resuelto = await resolverClubId(club);
+    teamIdPorClub[club] = resuelto.id;
+    teamBadgePorClub[club] = resuelto.badge;
+    if (resuelto.badge) {
+      await resolverEscudo(club, resuelto.badge); // precarga la caché con el que ya conocemos
+    }
     await pausa(1500);
   }
 
@@ -136,6 +179,10 @@ async function main() {
       if (errComp) { console.error(`Error en competencia "${nombreLiga}":`, errComp.message); continue; }
 
       const titulo = `${p.strHomeTeam} vs ${p.strAwayTeam}`;
+      const [escudoLocal, escudoVisitante] = await Promise.all([
+        resolverEscudo(p.strHomeTeam),
+        resolverEscudo(p.strAwayTeam),
+      ]);
 
       const { data: evento, error: errEvento } = await supabase
         .from('eventos')
@@ -149,6 +196,8 @@ async function main() {
             instancia: p.strRound || nombreLiga,
             sede: p.strVenue ?? null,
             horario_confirmado: horaConfirmada,
+            escudo_local: escudoLocal,
+            escudo_visitante: escudoVisitante,
             actualizado_en: new Date().toISOString(),
           },
           { onConflict: 'fuente,fuente_id' }
