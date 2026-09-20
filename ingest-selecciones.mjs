@@ -1,4 +1,3 @@
-
 // ============================================================
 //  Ingestor de Selecciones Nacionales — Básquet, Rugby, Vóley, Hockey
 //  (TheSportsDB → Supabase)
@@ -45,7 +44,7 @@ const SELECCIONES = [
   { deporteSlug: 'rugby',   deportistaSlug: 'los-pumas',                   teamId: '137124', teamNombreBusqueda: 'Argentina Rugby' },
   { deporteSlug: 'voley',   deportistaSlug: 'seleccion-voley-argentina',   teamId: '141818', teamNombreBusqueda: 'Argentina Volleyball' },
   { deporteSlug: 'hockey',  deportistaSlug: 'las-leonas',                  teamId: '141709', teamNombreBusqueda: 'Argentina Hockey Women' },
-  { deporteSlug: 'hockey',  deportistaSlug: 'los-leones',                  teamId: null,      teamNombreBusqueda: 'Argentina Hockey' },
+  { deporteSlug: 'hockey',  deportistaSlug: 'los-leones',                  teamId: '136712', teamNombreBusqueda: 'Argentina Hockey' },
 ];
 
 async function sportsDbGet(path) {
