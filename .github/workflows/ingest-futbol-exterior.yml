@@ -2,7 +2,7 @@ name: Ingest Futbol Exterior
 
 on:
   schedule:
-    - cron: '0 */2 * * *'   # cada 2 horas
+    - cron: '16 */2 * * *'   # cada 2 horas
   workflow_dispatch:
 
 jobs:
