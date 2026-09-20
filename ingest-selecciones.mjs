@@ -1,12 +1,3 @@
-// ============================================================
-//  Ingestor de Selecciones Nacionales — Básquet, Rugby, Vóley, Hockey
-//  (TheSportsDB → Supabase)
-//  Corre cada ~2 horas.
-// ============================================================
-//
-//  Variables de entorno necesarias:
-//    SUPABASE_URL
-//    SUPABASE_SERVICE_ROLE_KEY
 //
 //  No necesita API key propia (usa la key pública de prueba "3" de
 //  TheSportsDB, igual que el ingestor de la Selección de fútbol).
@@ -40,6 +31,7 @@ const SPORTSDB_BASE = `https://www.thesportsdb.com/api/v1/json/${SPORTSDB_KEY}`;
 // ---------- selecciones a seguir ----------
 // teamId: null significa "buscalo por nombre" (se resuelve solo la primera vez)
 const SELECCIONES = [
+  { deporteSlug: 'futbol',  deportistaSlug: 'seleccion-argentina',        teamId: '134509', teamNombreBusqueda: 'Argentina' },
   { deporteSlug: 'basquet', deportistaSlug: 'seleccion-basquet-argentina', teamId: '136736', teamNombreBusqueda: 'Argentina Basketball' },
   { deporteSlug: 'rugby',   deportistaSlug: 'los-pumas',                   teamId: '137124', teamNombreBusqueda: 'Argentina Rugby' },
   { deporteSlug: 'voley',   deportistaSlug: 'seleccion-voley-argentina',   teamId: '141818', teamNombreBusqueda: 'Argentina Volleyball' },
