@@ -55,40 +55,38 @@ async function sportsDbGet(path) {
 
 function pausa(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ---------- Escudos reales vía TheSportsDB, con la misma caché que usa fútbol exterior ----------
+// ---------- Escudos reales vía TheSportsDB — por ID de equipo (sin ambigüedad de nombres) ----------
 const cacheEscudosEnMemoria = {};
 
-async function resolverEscudo(nombreClub, badgeYaConocido) {
-  if (!nombreClub) return null;
-  if (nombreClub in cacheEscudosEnMemoria) return cacheEscudosEnMemoria[nombreClub];
+async function resolverEscudoPorId(teamId) {
+  if (!teamId) return null;
+  const clave = `id:${teamId}`;
+  if (clave in cacheEscudosEnMemoria) return cacheEscudosEnMemoria[clave];
 
   const { data: cacheado } = await supabase
-    .from('escudos_clubes').select('escudo_url').eq('nombre_club', nombreClub).maybeSingle();
+    .from('escudos_clubes').select('escudo_url').eq('nombre_club', clave).maybeSingle();
 
   if (cacheado && cacheado.escudo_url) {
-    cacheEscudosEnMemoria[nombreClub] = cacheado.escudo_url;
+    cacheEscudosEnMemoria[clave] = cacheado.escudo_url;
     return cacheado.escudo_url;
   }
 
-  let escudoUrl = badgeYaConocido || null;
-
-  if (!escudoUrl) {
-    try {
-      const data = await sportsDbGet(`/searchteams.php?t=${encodeURIComponent(nombreClub)}`);
-      escudoUrl = data?.teams?.[0]?.strTeamBadge ?? null;
-      await pausa(1200);
-    } catch (e) {
-      console.warn(`No pude resolver el escudo de "${nombreClub}": ${e.message}`);
-    }
+  let escudoUrl = null;
+  try {
+    const data = await sportsDbGet(`/lookupteam.php?id=${teamId}`);
+    escudoUrl = data?.teams?.[0]?.strTeamBadge ?? null;
+    await pausa(1200);
+  } catch (e) {
+    console.warn(`No pude resolver el escudo del equipo id ${teamId}: ${e.message}`);
   }
 
   if (escudoUrl) {
     await supabase
       .from('escudos_clubes')
-      .upsert({ nombre_club: nombreClub, escudo_url: escudoUrl, actualizado_en: new Date().toISOString() }, { onConflict: 'nombre_club' });
+      .upsert({ nombre_club: clave, escudo_url: escudoUrl, actualizado_en: new Date().toISOString() }, { onConflict: 'nombre_club' });
   }
 
-  cacheEscudosEnMemoria[nombreClub] = escudoUrl;
+  cacheEscudosEnMemoria[clave] = escudoUrl;
   return escudoUrl;
 }
 
@@ -134,9 +132,6 @@ async function main() {
     const resuelto = await resolverClubId(club);
     teamIdPorClub[club] = resuelto.id;
     teamBadgePorClub[club] = resuelto.badge;
-    if (resuelto.badge) {
-      await resolverEscudo(club, resuelto.badge); // precarga la caché con el que ya conocemos
-    }
     await pausa(1500);
   }
 
@@ -179,10 +174,17 @@ async function main() {
       if (errComp) { console.error(`Error en competencia "${nombreLiga}":`, errComp.message); continue; }
 
       const titulo = `${p.strHomeTeam} vs ${p.strAwayTeam}`;
-      const [escudoLocal, escudoVisitante] = await Promise.all([
-        resolverEscudo(p.strHomeTeam),
-        resolverEscudo(p.strAwayTeam),
-      ]);
+
+      // Nuestro club ya tiene el escudo resuelto (teamBadgePorClub). Para el rival,
+      // usamos su ID de equipo (idHomeTeam/idAwayTeam vienen en el partido) — sin
+      // adivinar por nombre, que es donde fallaba antes.
+      const esLocalNuestro = String(p.idHomeTeam) === String(teamId);
+      const escudoLocal = esLocalNuestro
+        ? teamBadgePorClub[club]
+        : await resolverEscudoPorId(p.idHomeTeam);
+      const escudoVisitante = !esLocalNuestro
+        ? teamBadgePorClub[club]
+        : await resolverEscudoPorId(p.idAwayTeam);
 
       const { data: evento, error: errEvento } = await supabase
         .from('eventos')
@@ -230,3 +232,4 @@ main().catch(err => {
   console.error('El ingestor de básquet falló:', err);
   process.exit(1);
 });
+
