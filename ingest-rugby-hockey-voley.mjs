@@ -41,7 +41,6 @@ const JUGADORES = [
   { slug: 'rodrigo-isgro',           deporteSlug: 'rugby', club: 'Harlequins' },
   { slug: 'juan-martin-gonzalez',    deporteSlug: 'rugby', club: 'Saracens' },
   { slug: 'lucio-cinti',             deporteSlug: 'rugby', club: 'Saracens' },
-  { slug: 'agustin-creevy',          deporteSlug: 'rugby', club: 'Sale Sharks' },
   { slug: 'joel-sclavi',             deporteSlug: 'rugby', club: 'Leicester Tigers' },
   { slug: 'matias-alemanno',         deporteSlug: 'rugby', club: 'Gloucester' },
   { slug: 'mateo-carreras',          deporteSlug: 'rugby', club: 'Bayonne' },
@@ -69,11 +68,17 @@ const JUGADORES = [
   { slug: 'ezequiel-palacios-voley', deporteSlug: 'voley', club: 'Montpellier' },
 ];
 
-async function sportsDbGet(path) {
+async function sportsDbGet(path, reintentos = 2) {
   const resp = await fetch(`${SPORTSDB_BASE}${path}`);
+  if (resp.status === 429 || resp.status === 403) {
+    if (reintentos > 0) {
+      console.warn(`TheSportsDB nos frenó (${resp.status}), espero 30s y reintento (${reintentos} intentos quedan)...`);
+      await pausa(30000);
+      return sportsDbGet(path, reintentos - 1);
+    }
+  }
   if (!resp.ok) {
-    const body = await resp.text().catch(() => '');
-    throw new Error(`TheSportsDB respondió ${resp.status}: ${body}`);
+    throw new Error(`TheSportsDB respondió ${resp.status}`);
   }
   return resp.json();
 }
