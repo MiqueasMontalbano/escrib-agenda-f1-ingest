@@ -40,7 +40,7 @@ const SPORTSDB_BASE = `https://www.thesportsdb.com/api/v1/json/${SPORTSDB_KEY}`;
 // ---------- selecciones a seguir ----------
 // teamId: null significa "buscalo por nombre" (se resuelve solo la primera vez)
 const SELECCIONES = [
-  { deporteSlug: 'futbol',  deportistaSlug: 'seleccion-argentina',        teamId: '134509', teamNombreBusqueda: 'Argentina' },
+  { deporteSlug: 'futbol',  deportistaSlug: 'seleccion-argentina-futbol', teamId: '134509', teamNombreBusqueda: 'Argentina' },
   { deporteSlug: 'basquet', deportistaSlug: 'seleccion-basquet-argentina', teamId: '136736', teamNombreBusqueda: 'Argentina Basketball' },
   { deporteSlug: 'rugby',   deportistaSlug: 'los-pumas',                   teamId: '137124', teamNombreBusqueda: 'Argentina Rugby' },
   { deporteSlug: 'voley',   deportistaSlug: 'seleccion-voley-argentina',   teamId: '141818', teamNombreBusqueda: 'Argentina Volleyball' },
