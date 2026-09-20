@@ -132,6 +132,7 @@ async function main() {
     const resuelto = await resolverClubId(club);
     teamIdPorClub[club] = resuelto.id;
     teamBadgePorClub[club] = resuelto.badge;
+    console.log(`DEBUG resolverClubId("${club}") → id=${resuelto.id} badge=${resuelto.badge ?? 'NULL'}`);
     await pausa(1500);
   }
 
@@ -174,6 +175,7 @@ async function main() {
       if (errComp) { console.error(`Error en competencia "${nombreLiga}":`, errComp.message); continue; }
 
       const titulo = `${p.strHomeTeam} vs ${p.strAwayTeam}`;
+      console.log(`DEBUG partido: idHomeTeam=${p.idHomeTeam} idAwayTeam=${p.idAwayTeam} nuestro teamId=${teamId} strHomeTeam=${p.strHomeTeam} strAwayTeam=${p.strAwayTeam}`);
 
       // Nuestro club ya tiene el escudo resuelto (teamBadgePorClub). Para el rival,
       // usamos su ID de equipo (idHomeTeam/idAwayTeam vienen en el partido) — sin
@@ -185,6 +187,7 @@ async function main() {
       const escudoVisitante = !esLocalNuestro
         ? teamBadgePorClub[club]
         : await resolverEscudoPorId(p.idAwayTeam);
+      console.log(`DEBUG escudos: local=${escudoLocal ?? 'NULL'} visitante=${escudoVisitante ?? 'NULL'}`);
 
       const { data: evento, error: errEvento } = await supabase
         .from('eventos')
@@ -232,4 +235,3 @@ main().catch(err => {
   console.error('El ingestor de básquet falló:', err);
   process.exit(1);
 });
-
