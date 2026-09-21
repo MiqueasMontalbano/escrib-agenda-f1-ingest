@@ -290,7 +290,6 @@ async function main() {
       // pedimos FINISHED sin filtro de fecha y nos quedamos con los últimos 5)
       const resp = await fdGet(`/teams/${teamId}/matches?status=FINISHED&limit=5`);
       partidosFinalizados = resp.matches ?? [];
-      console.log(`DEBUG ${club}: ${partidosFinalizados.length} finalizados. status del primero: ${partidosFinalizados[0]?.status ?? 'N/A'}`);
     } catch (e) {
       console.warn(`No pude traer partidos finalizados de ${club}: ${e.message}`);
       partidosFinalizados = [];
