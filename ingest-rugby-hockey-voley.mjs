@@ -32,9 +32,9 @@ const SPORTSDB_BASE = `https://www.thesportsdb.com/api/v1/json/${SPORTSDB_KEY}`;
 const JUGADORES = [
   // Rugby
   { slug: 'santiago-carreras',       deporteSlug: 'rugby', club: 'Bath' },
-  { slug: 'julian-montoya',          deporteSlug: 'rugby', club: 'Pau' },
-  { slug: 'marcos-kremer',           deporteSlug: 'rugby', club: 'Clermont' },
-  { slug: 'facundo-isa',             deporteSlug: 'rugby', club: 'Pau' },
+  { slug: 'julian-montoya',          deporteSlug: 'rugby', club: 'Section Paloise' },
+  { slug: 'marcos-kremer',           deporteSlug: 'rugby', club: 'ASM Clermont Auvergne' },
+  { slug: 'facundo-isa',             deporteSlug: 'rugby', club: 'Section Paloise' },
   { slug: 'guido-petti',             deporteSlug: 'rugby', club: 'Harlequins' },
   { slug: 'boris-wenger',            deporteSlug: 'rugby', club: 'Harlequins' },
   { slug: 'pedro-delgado',           deporteSlug: 'rugby', club: 'Harlequins' },
@@ -43,8 +43,8 @@ const JUGADORES = [
   { slug: 'lucio-cinti',             deporteSlug: 'rugby', club: 'Saracens' },
   { slug: 'joel-sclavi',             deporteSlug: 'rugby', club: 'Leicester Tigers' },
   { slug: 'matias-alemanno',         deporteSlug: 'rugby', club: 'Gloucester' },
-  { slug: 'mateo-carreras',          deporteSlug: 'rugby', club: 'Bayonne' },
-  { slug: 'gonzalo-garcia',          deporteSlug: 'rugby', club: 'Pau' },
+  { slug: 'mateo-carreras',          deporteSlug: 'rugby', club: 'Aviron Bayonnais' },
+  { slug: 'gonzalo-garcia',          deporteSlug: 'rugby', club: 'Section Paloise' },
   // Hockey
   { slug: 'nicolas-della-torre',     deporteSlug: 'hockey', club: 'KHC Dragons' },
   { slug: 'lucas-martinez',          deporteSlug: 'hockey', club: 'KHC Dragons' },
@@ -120,11 +120,19 @@ async function resolverEscudoPorId(teamId) {
   return escudoUrl;
 }
 
-async function resolverClubId(nombreClub) {
+async function resolverClubId(nombreClub, deporteEsperado) {
   const data = await sportsDbGet(`/searchteams.php?t=${encodeURIComponent(nombreClub)}`);
-  const encontrado = data?.teams?.[0];
+  const candidatos = data?.teams ?? [];
+
+  // Filtramos por el deporte que esperamos — sin esto, un nombre corto/ambiguo
+  // como "Pau" o "Real Sociedad" puede matchear el club de FÚTBOL homónimo
+  // (mucho más conocido en la base) en vez del de rugby/hockey/vóley real.
+  const SPORT_THESPORTSDB = { rugby: 'Rugby Union', hockey: 'Field Hockey', voley: 'Volleyball' };
+  const sportEsperado = SPORT_THESPORTSDB[deporteEsperado];
+  const encontrado = candidatos.find(t => t.strSport === sportEsperado);
+
   if (!encontrado) {
-    console.warn(`No encontré el club "${nombreClub}" en TheSportsDB.`);
+    console.warn(`No encontré el club "${nombreClub}" en TheSportsDB con deporte "${sportEsperado}" (evito adivinar mal).`);
     return { id: null, badge: null };
   }
   return { id: encontrado.idTeam, badge: encontrado.strTeamBadge ?? null };
@@ -153,7 +161,8 @@ async function main() {
   const teamBadgePorClub = {};
 
   for (const club of clubesUnicos) {
-    const resuelto = await resolverClubId(club);
+    const deporteDelClub = JUGADORES.find(j => j.club === club)?.deporteSlug;
+    const resuelto = await resolverClubId(club, deporteDelClub);
     teamIdPorClub[club] = resuelto.id;
     teamBadgePorClub[club] = resuelto.badge;
     await pausa(1200);
