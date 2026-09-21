@@ -124,6 +124,12 @@ async function main() {
         sede,
       });
       eventosCreados++;
+
+      // Si la carrera ya pasó, buscamos el resultado del piloto argentino.
+      const yaPaso = new Date(`${carrera.date}T${carrera.time}`) < new Date();
+      if (yaPaso) {
+        await guardarResultadoCarrera(temporada, carrera.round, `${temporada}-${carrera.round}-Race`);
+      }
     }
   }
 
@@ -161,6 +167,38 @@ async function main() {
   }
 
   console.log('Participaciones sincronizadas.');
+}
+
+async function guardarResultadoCarrera(temporada, round, fuenteId) {
+  try {
+    const resp = await fetch(`https://api.jolpi.ca/ergast/f1/${temporada}/${round}/results.json`, { headers: HEADERS });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const resultados = data?.MRData?.RaceTable?.Races?.[0]?.Results ?? [];
+
+    // Buscamos a cualquiera de nuestros pilotos argentinos en la grilla de resultados.
+    const driverIds = Object.keys(PILOTOS_AR);
+    const filaPiloto = resultados.find(r => driverIds.includes(r.Driver?.driverId));
+    if (!filaPiloto) return; // todavía no está cargado el resultado, o no corrió
+
+    let resultadoTexto;
+    if (filaPiloto.positionText && /^\d+$/.test(filaPiloto.positionText)) {
+      resultadoTexto = `P${filaPiloto.positionText}`;
+    } else {
+      // "R" = abandono (retired), "D" = descalificado, etc.
+      resultadoTexto = filaPiloto.status || `P${filaPiloto.positionText ?? '?'}`;
+    }
+
+    const { error } = await supabase
+      .from('eventos')
+      .update({ finalizado: true, resultado: resultadoTexto, actualizado_en: new Date().toISOString() })
+      .eq('fuente', 'jolpica-f1')
+      .eq('fuente_id', fuenteId);
+
+    if (error) console.error(`Error guardando resultado de ${fuenteId}:`, error.message);
+  } catch (e) {
+    console.warn(`No pude traer el resultado de la carrera ${fuenteId}: ${e.message}`);
+  }
 }
 
 async function upsertEvento({ fuenteId, competenciaId, comienzaEn, titulo, instancia, sede }) {
