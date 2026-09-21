@@ -117,7 +117,7 @@ const JUGADORES = [
 
   { slug: 'facundo-medina', club: 'Bayer Leverkusen' },
   { slug: 'ezequiel-fernandez', club: 'Bayer Leverkusen' },
-  { slug: 'nicolas-capaldo', club: 'Hamburgo' },
+  { slug: 'nicolas-capaldo', club: 'Hamburger SV' },
 ];
 
 // Si la búsqueda automática no encuentra bien un club, se puede forzar
@@ -155,6 +155,8 @@ function pausa(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ---------- Escudos reales vía api-football.com, con caché en Supabase ----------
 const cacheEscudosEnMemoria = {}; // evita ir a Supabase dos veces por el mismo club en la misma corrida
+const MAX_ESCUDOS_NUEVOS_POR_CORRIDA = 8; // cuidamos la cuota diaria (100/día) y el límite por minuto (10/min)
+let escudosNuevosEnEstaCorrida = 0;
 
 async function resolveEscudo(nombreClub) {
   if (!nombreClub || nombreClub === '?') return null;
@@ -172,25 +174,36 @@ async function resolveEscudo(nombreClub) {
     return cacheado.escudo_url;
   }
 
-  // 2. no está cacheado: lo pedimos a api-football.com (si tenemos key)
+  // 2. no está cacheado: solo lo pedimos si no llegamos al tope de esta corrida
   if (!AF_KEY) return null;
+  if (escudosNuevosEnEstaCorrida >= MAX_ESCUDOS_NUEVOS_POR_CORRIDA) {
+    return null; // se va a intentar de nuevo en la próxima corrida, en 2hs
+  }
+  escudosNuevosEnEstaCorrida++;
 
   let escudoUrl = null;
   try {
-    const resp = await fetch(`${AF_BASE}/teams?search=${encodeURIComponent(nombreClub)}`, { headers: AF_HEADERS });
+    let resp = await fetch(`${AF_BASE}/teams?search=${encodeURIComponent(nombreClub)}`, { headers: AF_HEADERS });
+
+    if (resp.status === 429) {
+      console.warn(`Límite de requests por minuto alcanzado buscando "${nombreClub}", espero 20s y reintento...`);
+      await pausa(20000);
+      resp = await fetch(`${AF_BASE}/teams?search=${encodeURIComponent(nombreClub)}`, { headers: AF_HEADERS });
+    }
+
     if (resp.ok) {
       const data = await resp.json();
       escudoUrl = data?.response?.[0]?.team?.logo ?? null;
     } else {
-      console.warn(`api-football.com respondió ${resp.status} buscando "${nombreClub}" — probablemente límite de requests por minuto.`);
+      console.warn(`api-football.com respondió ${resp.status} buscando "${nombreClub}".`);
     }
-    await pausa(6500); // el plan free es más estricto por minuto de lo que parece; vamos despacio
+    await pausa(10000); // plan free: 10 requests/min → vamos a ~6/min para tener margen
   } catch (e) {
     console.warn(`No pude resolver el escudo de "${nombreClub}": ${e.message}`);
   }
 
   // Solo cacheamos cuando SÍ encontramos algo. Si vino null (por rate limit u otra falla temporal),
-  // no lo guardamos como definitivo — así la próxima corrida lo vuelve a intentar solo.
+  // no lo guardamos como definitivo — así una próxima corrida lo vuelve a intentar solo.
   if (escudoUrl) {
     await supabase
       .from('escudos_clubes')
@@ -264,14 +277,25 @@ async function main() {
     const teamId = teamIdPorClub[club];
     if (!teamId) continue;
 
-    let partidos;
+    let partidosProximos, partidosFinalizados;
     try {
       const resp = await fdGet(`/teams/${teamId}/matches?status=SCHEDULED&limit=15`);
-      partidos = resp.matches ?? [];
+      partidosProximos = resp.matches ?? [];
     } catch (e) {
-      console.warn(`No pude traer partidos de ${club}: ${e.message}`);
-      continue;
+      console.warn(`No pude traer próximos partidos de ${club}: ${e.message}`);
+      partidosProximos = [];
     }
+    try {
+      // últimos 5 partidos ya jugados (football-data.org acepta un rango de fechas;
+      // pedimos FINISHED sin filtro de fecha y nos quedamos con los últimos 5)
+      const resp = await fdGet(`/teams/${teamId}/matches?status=FINISHED&limit=5`);
+      partidosFinalizados = resp.matches ?? [];
+    } catch (e) {
+      console.warn(`No pude traer partidos finalizados de ${club}: ${e.message}`);
+      partidosFinalizados = [];
+    }
+
+    const partidos = [...partidosProximos, ...partidosFinalizados];
 
     const jugadoresDelClub = JUGADORES.filter(j => j.club === club && deportistaIdPorSlug[j.slug]);
 
@@ -294,10 +318,15 @@ async function main() {
 
       const local = partido.homeTeam?.name ?? '?';
       const visitante = partido.awayTeam?.name ?? '?';
-      const [escudoLocal, escudoVisitante] = await Promise.all([
-        resolveEscudo(local),
-        resolveEscudo(visitante),
-      ]);
+      const escudoLocal = await resolveEscudo(local);
+      const escudoVisitante = await resolveEscudo(visitante);
+
+      const finalizado = partido.status === 'FINISHED';
+      const golesLocal = partido.score?.fullTime?.home;
+      const golesVisitante = partido.score?.fullTime?.away;
+      const resultado = finalizado && golesLocal != null && golesVisitante != null
+        ? `${golesLocal}-${golesVisitante}`
+        : null;
 
       const { data: evento, error: errEvento } = await supabase
         .from('eventos')
@@ -313,6 +342,8 @@ async function main() {
             horario_confirmado: true,
             escudo_local: escudoLocal,
             escudo_visitante: escudoVisitante,
+            finalizado,
+            resultado,
             actualizado_en: new Date().toISOString(),
           },
           { onConflict: 'fuente,fuente_id' }
@@ -339,6 +370,10 @@ async function main() {
   }
 
   console.log(`Listo. ${eventosCreados} eventos de clubes sincronizados.`);
+  console.log(`Escudos nuevos resueltos en esta corrida: ${escudosNuevosEnEstaCorrida}/${MAX_ESCUDOS_NUEVOS_POR_CORRIDA}.`);
+  if (escudosNuevosEnEstaCorrida >= MAX_ESCUDOS_NUEVOS_POR_CORRIDA) {
+    console.log('Llegamos al tope de esta corrida — los escudos que falten se van a seguir completando solos en las próximas corridas (cada 2hs).');
+  }
 }
 
 main().catch(err => {
