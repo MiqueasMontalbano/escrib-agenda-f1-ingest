@@ -180,16 +180,21 @@ async function main() {
     const deporteId = deporteIdPorSlug[deporteSlug];
     if (!deporteId) { console.warn(`No encontré el deporte "${deporteSlug}" en Supabase.`); continue; }
 
-    let partidos;
+    let proximos = [], finalizados = [];
     try {
       const resp = await sportsDbGet(`/eventsnext.php?id=${teamId}`);
-      partidos = resp?.events ?? [];
+      proximos = resp?.events ?? [];
     } catch (e) {
-      console.warn(`No pude traer partidos de ${club}: ${e.message}`);
-      continue;
+      console.warn(`No pude traer próximos partidos de ${club}: ${e.message}`);
+    }
+    try {
+      const resp = await sportsDbGet(`/eventslast.php?id=${teamId}`);
+      finalizados = resp?.results ?? [];
+    } catch (e) {
+      console.warn(`No pude traer partidos finalizados de ${club}: ${e.message}`);
     }
 
-    for (const p of partidos) {
+    for (const p of [...proximos, ...finalizados]) {
       if (!p.dateEvent) continue;
 
       const horaConfirmada = !!p.strTime && p.strTime !== '00:00:00';
@@ -219,6 +224,9 @@ async function main() {
         ? teamBadgePorClub[club]
         : await resolverEscudoPorId(p.idAwayTeam);
 
+      const finalizado = p.intHomeScore != null && p.intAwayScore != null;
+      const resultado = finalizado ? `${p.intHomeScore}-${p.intAwayScore}` : null;
+
       const { data: evento, error: errEvento } = await supabase
         .from('eventos')
         .upsert(
@@ -233,6 +241,8 @@ async function main() {
             horario_confirmado: horaConfirmada,
             escudo_local: escudoLocal,
             escudo_visitante: escudoVisitante,
+            finalizado,
+            resultado,
             actualizado_en: new Date().toISOString(),
           },
           { onConflict: 'fuente,fuente_id' }

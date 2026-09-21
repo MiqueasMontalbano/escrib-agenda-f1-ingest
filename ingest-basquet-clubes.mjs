@@ -138,29 +138,33 @@ async function main() {
     const resuelto = await resolverClubId(club);
     teamIdPorClub[club] = resuelto.id;
     teamBadgePorClub[club] = resuelto.badge;
-    console.log(`DEBUG resolverClubId("${club}") → id=${resuelto.id} badge=${resuelto.badge ?? 'NULL'}`);
     await pausa(1500);
   }
 
-  // ---------- 3. traer el próximo partido de cada club y guardarlo ----------
+  // ---------- 3. traer el próximo partido + el último jugado de cada club ----------
   let creados = 0;
 
   for (const club of clubesUnicos) {
     const teamId = teamIdPorClub[club];
     if (!teamId) continue;
 
-    let partidos;
+    let proximos = [], finalizados = [];
     try {
       const resp = await sportsDbGet(`/eventsnext.php?id=${teamId}`);
-      partidos = resp?.events ?? [];
+      proximos = resp?.events ?? [];
     } catch (e) {
-      console.warn(`No pude traer partidos de ${club}: ${e.message}`);
-      continue;
+      console.warn(`No pude traer próximos partidos de ${club}: ${e.message}`);
+    }
+    try {
+      const resp = await sportsDbGet(`/eventslast.php?id=${teamId}`);
+      finalizados = resp?.results ?? [];
+    } catch (e) {
+      console.warn(`No pude traer partidos finalizados de ${club}: ${e.message}`);
     }
 
     const jugadoresDelClub = JUGADORES.filter(j => j.club === club && deportistaIdPorSlug[j.slug]);
 
-    for (const p of partidos) {
+    for (const p of [...proximos, ...finalizados]) {
       if (!p.dateEvent) continue;
 
       const horaConfirmada = !!p.strTime && p.strTime !== '00:00:00';
@@ -181,7 +185,6 @@ async function main() {
       if (errComp) { console.error(`Error en competencia "${nombreLiga}":`, errComp.message); continue; }
 
       const titulo = `${p.strHomeTeam} vs ${p.strAwayTeam}`;
-      console.log(`DEBUG partido: idHomeTeam=${p.idHomeTeam} idAwayTeam=${p.idAwayTeam} nuestro teamId=${teamId} strHomeTeam=${p.strHomeTeam} strAwayTeam=${p.strAwayTeam}`);
 
       // Nuestro club ya tiene el escudo resuelto (teamBadgePorClub). Para el rival,
       // usamos su ID de equipo (idHomeTeam/idAwayTeam vienen en el partido) — sin
@@ -193,7 +196,9 @@ async function main() {
       const escudoVisitante = !esLocalNuestro
         ? teamBadgePorClub[club]
         : await resolverEscudoPorId(p.idAwayTeam);
-      console.log(`DEBUG escudos: local=${escudoLocal ?? 'NULL'} visitante=${escudoVisitante ?? 'NULL'}`);
+
+      const finalizado = p.intHomeScore != null && p.intAwayScore != null;
+      const resultado = finalizado ? `${p.intHomeScore}-${p.intAwayScore}` : null;
 
       const { data: evento, error: errEvento } = await supabase
         .from('eventos')
@@ -209,6 +214,8 @@ async function main() {
             horario_confirmado: horaConfirmada,
             escudo_local: escudoLocal,
             escudo_visitante: escudoVisitante,
+            finalizado,
+            resultado,
             actualizado_en: new Date().toISOString(),
           },
           { onConflict: 'fuente,fuente_id' }

@@ -235,6 +235,53 @@ async function main() {
   if (eventosSinHorario > 0) {
     console.log(`${eventosSinHorario} partidos todavía sin horario confirmado (se van a traer en la próxima corrida).`);
   }
+
+  // ---------- 4. Resultados de partidos que ya deberían haber terminado ----------
+  // El plan free NO permite pedir "todos los completados" en bloque (eso es de pago),
+  // pero SÍ permite consultar UN partido puntual por su ID (GET /matches/{id}) gratis.
+  // Como ya tenemos guardados los IDs de nuestros propios partidos, los repasamos
+  // uno por uno para ver cuáles ya terminaron.
+  const { data: pendientes } = await supabase
+    .from('eventos')
+    .select('id, fuente_id')
+    .eq('fuente', 'live-tennis-api')
+    .eq('finalizado', false)
+    .lt('comienza_en', new Date().toISOString());
+
+  let actualizados = 0;
+  for (const ev of pendientes ?? []) {
+    let detalle;
+    try {
+      detalle = await apiGet(`/matches/${ev.fuente_id}`);
+    } catch (e) {
+      continue; // puede que todavía no haya info, se reintenta en la próxima corrida
+    }
+
+    const partido = detalle?.data ?? detalle;
+    if (!partido?.score) continue; // todavía no hay resultado cargado
+
+    // El formato exacto del resultado puede variar; armamos el string con lo
+    // que tengamos disponible, de la forma más robusta posible.
+    let resultadoTexto = null;
+    if (Array.isArray(partido.score?.sets)) {
+      resultadoTexto = partido.score.sets
+        .map(s => `${s.p1 ?? s.player1 ?? '?'}-${s.p2 ?? s.player2 ?? '?'}`)
+        .join(' ');
+    } else if (typeof partido.score === 'string') {
+      resultadoTexto = partido.score;
+    }
+
+    if (!resultadoTexto) continue;
+
+    const { error } = await supabase
+      .from('eventos')
+      .update({ finalizado: true, resultado: resultadoTexto, actualizado_en: new Date().toISOString() })
+      .eq('id', ev.id);
+
+    if (!error) actualizados++;
+  }
+
+  console.log(`Resultados actualizados en esta corrida: ${actualizados}/${(pendientes ?? []).length} partidos pendientes.`);
 }
 
 main().catch(err => {

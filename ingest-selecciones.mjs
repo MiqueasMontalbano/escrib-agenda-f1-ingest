@@ -94,6 +94,64 @@ const NOMBRES_DEPORTES = {
   hockey: 'Hockey',
 };
 
+async function guardarPartido(p, seleccion, deporteId, deportista) {
+  if (!p.dateEvent) return false;
+
+  const horaConfirmada = !!p.strTime && p.strTime !== '00:00:00';
+  const comienzaEn = horaConfirmada ? `${p.dateEvent}T${p.strTime}Z` : `${p.dateEvent}T12:00:00Z`;
+  const nombreLiga = p.strLeague ?? NOMBRES_DEPORTES[seleccion.deporteSlug];
+  const anio = p.dateEvent.slice(0, 4);
+  const slugComp = `${seleccion.deporteSlug}-${nombreLiga.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${anio}`;
+
+  const { data: competencia, error: errComp } = await supabase
+    .from('competencias')
+    .upsert(
+      { slug: slugComp, nombre: nombreLiga, deporte_id: deporteId, temporada: anio, prioridad: 5 },
+      { onConflict: 'slug' }
+    )
+    .select()
+    .single();
+
+  if (errComp) { console.error(`Error en competencia "${nombreLiga}":`, errComp.message); return false; }
+
+  const titulo = `${p.strHomeTeam} vs ${p.strAwayTeam}`;
+  const finalizado = p.intHomeScore != null && p.intAwayScore != null;
+  const resultado = finalizado ? `${p.intHomeScore}-${p.intAwayScore}` : null;
+
+  const { data: evento, error: errEvento } = await supabase
+    .from('eventos')
+    .upsert(
+      {
+        fuente: 'thesportsdb',
+        fuente_id: String(p.idEvent),
+        competencia_id: competencia.id,
+        comienza_en: comienzaEn,
+        titulo,
+        instancia: p.strRound || nombreLiga,
+        sede: p.strVenue ?? null,
+        horario_confirmado: horaConfirmada,
+        finalizado,
+        resultado,
+        actualizado_en: new Date().toISOString(),
+      },
+      { onConflict: 'fuente,fuente_id' }
+    )
+    .select()
+    .single();
+
+  if (errEvento) { console.error(`Error en partido "${titulo}":`, errEvento.message); return false; }
+
+  const { error: errPart } = await supabase
+    .from('participaciones')
+    .upsert(
+      { evento_id: evento.id, deportista_id: deportista.id },
+      { onConflict: 'evento_id,deportista_id', ignoreDuplicates: true }
+    );
+  if (errPart) console.error('Error linkeando participación:', errPart.message);
+
+  return true;
+}
+
 async function main() {
   for (const seleccion of SELECCIONES) {
     console.log(`\n--- ${seleccion.deportistaSlug} ---`);
@@ -113,72 +171,27 @@ async function main() {
     const teamId = await resolverTeamId(seleccion);
     if (!teamId) continue;
 
-    // ---------- 2. próximos partidos ----------
-    let partidos;
+    // ---------- 2. próximos partidos + últimos jugados ----------
+    let proximos = [], finalizados = [];
     try {
       const resp = await sportsDbGet(`/eventsnext.php?id=${teamId}`);
-      partidos = resp?.events ?? [];
+      proximos = resp?.events ?? [];
     } catch (e) {
-      console.warn(`No pude traer partidos de ${seleccion.deportistaSlug}: ${e.message}`);
-      continue;
+      console.warn(`No pude traer próximos partidos de ${seleccion.deportistaSlug}: ${e.message}`);
+    }
+    try {
+      const resp = await sportsDbGet(`/eventslast.php?id=${teamId}`);
+      finalizados = resp?.results ?? [];
+    } catch (e) {
+      console.warn(`No pude traer partidos finalizados de ${seleccion.deportistaSlug}: ${e.message}`);
     }
 
-    console.log(`${partidos.length} próximos partidos encontrados.`);
+    console.log(`${proximos.length} próximos, ${finalizados.length} finalizados encontrados.`);
 
     let creados = 0;
-
-    for (const p of partidos) {
-      if (!p.dateEvent) continue;
-
-      const horaConfirmada = !!p.strTime && p.strTime !== '00:00:00';
-      const comienzaEn = horaConfirmada ? `${p.dateEvent}T${p.strTime}Z` : `${p.dateEvent}T12:00:00Z`;
-      const nombreLiga = p.strLeague ?? NOMBRES_DEPORTES[seleccion.deporteSlug];
-      const anio = p.dateEvent.slice(0, 4);
-      const slugComp = `${seleccion.deporteSlug}-${nombreLiga.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${anio}`;
-
-      const { data: competencia, error: errComp } = await supabase
-        .from('competencias')
-        .upsert(
-          { slug: slugComp, nombre: nombreLiga, deporte_id: deporteId, temporada: anio, prioridad: 5 },
-          { onConflict: 'slug' }
-        )
-        .select()
-        .single();
-
-      if (errComp) { console.error(`Error en competencia "${nombreLiga}":`, errComp.message); continue; }
-
-      const titulo = `${p.strHomeTeam} vs ${p.strAwayTeam}`;
-
-      const { data: evento, error: errEvento } = await supabase
-        .from('eventos')
-        .upsert(
-          {
-            fuente: 'thesportsdb',
-            fuente_id: String(p.idEvent),
-            competencia_id: competencia.id,
-            comienza_en: comienzaEn,
-            titulo,
-            instancia: p.strRound || nombreLiga,
-            sede: p.strVenue ?? null,
-            horario_confirmado: horaConfirmada,
-            actualizado_en: new Date().toISOString(),
-          },
-          { onConflict: 'fuente,fuente_id' }
-        )
-        .select()
-        .single();
-
-      if (errEvento) { console.error(`Error en partido "${titulo}":`, errEvento.message); continue; }
-
-      creados++;
-
-      const { error: errPart } = await supabase
-        .from('participaciones')
-        .upsert(
-          { evento_id: evento.id, deportista_id: deportista.id },
-          { onConflict: 'evento_id,deportista_id', ignoreDuplicates: true }
-        );
-      if (errPart) console.error('Error linkeando participación:', errPart.message);
+    for (const p of [...proximos, ...finalizados]) {
+      const ok = await guardarPartido(p, seleccion, deporteId, deportista);
+      if (ok) creados++;
     }
 
     console.log(`Listo: ${creados} eventos sincronizados para ${seleccion.deportistaSlug}.`);
